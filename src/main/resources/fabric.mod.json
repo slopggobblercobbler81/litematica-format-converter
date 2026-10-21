@@ -18,6 +18,9 @@
   "entrypoints": {
     "client": [
       "com.slopggobblercobbler.litematica_converter.LitematicaFormatConverterMod"
+    ],
+    "modmenu": [
+      "com.slopggobblercobbler.litematica_converter.compat.ModMenuIntegration"
     ]
   },
   "depends": {
