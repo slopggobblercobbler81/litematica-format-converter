@@ -155,4 +155,33 @@ public class SpongeSchematicNbtTest {
         assertEquals(0, vals[1]);
         assertEquals(-5, vals[2]);
     }
+
+    @Test
+    public void testCorruptedOrTruncatedNbtInput() {
+        // Test completely empty input stream
+        assertThrows(IOException.class, () -> {
+            NBTUtil.readCompound(new ByteArrayInputStream(new byte[0]));
+        });
+
+        // Test truncated GZIP / random junk bytes
+        assertThrows(IOException.class, () -> {
+            NBTUtil.readCompound(new ByteArrayInputStream(new byte[] { 0x1f, (byte) 0x8b, 0x08, 0x00 }));
+        });
+
+        // Test valid gzip header but incomplete payload
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos)) {
+            gzip.write(new byte[] { 0x0a, 0x00, 0x04, 'T', 'e', 's', 't' });
+        } catch (IOException ignored) {}
+        
+        byte[] truncatedGzip = baos.toByteArray();
+        // Chop off the end to corrupt it
+        if (truncatedGzip.length > 5) {
+            byte[] corrupted = new byte[truncatedGzip.length - 4];
+            System.arraycopy(truncatedGzip, 0, corrupted, 0, corrupted.length);
+            assertThrows(IOException.class, () -> {
+                NBTUtil.readCompound(new ByteArrayInputStream(corrupted));
+            });
+        }
+    }
 }
