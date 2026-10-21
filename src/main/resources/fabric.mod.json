@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "litematica_format_converter",
+  "version": "${version}",
+  "name": "Litematica Format Converter",
+  "description": "Seamless bidirectional format converter between WorldEdit .schem, Sponge, legacy MCEdit .schematic, Structure NBT, and Litematica .litematic.",
+  "authors": [
+    "slopggobblercobbler81"
+  ],
+  "contact": {
+    "homepage": "https://github.com/slopggobblercobbler81/litematica-format-converter",
+    "sources": "https://github.com/slopggobblercobbler81/litematica-format-converter",
+    "issues": "https://github.com/slopggobblercobbler81/litematica-format-converter/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/litematica_format_converter/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.slopggobblercobbler.litematica_converter.LitematicaFormatConverterMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric": "*",
+    "minecraft": ">=1.21",
+    "litematica": ">=0.18.0",
+    "malilib": ">=0.19.0"
+  },
+  "suggests": {
+    "worldedit": "*"
+  }
+}

@@ -1,0 +1,26 @@
+# Gradle & Loom build files
+.gradle/
+build/
+bin/
+run/
+out/
+
+# Loom caching & remap
+.loom/
+.fabric/
+
+# IDE files
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+
+# OS / Temporary
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
