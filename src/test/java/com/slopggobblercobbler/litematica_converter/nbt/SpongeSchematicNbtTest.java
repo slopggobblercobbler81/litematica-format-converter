@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class SpongeSchematicNbtTest {
 
-    private byte[] createSampleSpongeNbt(int version) throws IOException {
+    private byte[] createSampleSpongeNbt(int version, boolean negativeOffset, boolean largePalette) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
              DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
@@ -30,26 +30,33 @@ public class SpongeSchematicNbtTest {
             dos.writeUTF("Metadata");
             dos.writeByte(TagType.TAG_STRING.getId());
             dos.writeUTF("Name");
-            dos.writeUTF("Test");
+            dos.writeUTF("AdvancedTest");
             dos.writeByte(TagType.TAG_END.getId());
 
             dos.writeByte(TagType.TAG_SHORT.getId());
             dos.writeUTF("Width");
-            dos.writeShort(2);
+            dos.writeShort(16);
 
             dos.writeByte(TagType.TAG_SHORT.getId());
             dos.writeUTF("Height");
-            dos.writeShort(2);
+            dos.writeShort(16);
 
             dos.writeByte(TagType.TAG_SHORT.getId());
             dos.writeUTF("Length");
-            dos.writeShort(2);
+            dos.writeShort(16);
+
+            dos.writeByte(TagType.TAG_INT_ARRAY.getId());
+            dos.writeUTF("Offset");
+            dos.writeInt(3);
+            dos.writeInt(negativeOffset ? -10 : 0);
+            dos.writeInt(0);
+            dos.writeInt(negativeOffset ? -5 : 0);
 
             dos.writeByte(TagType.TAG_COMPOUND.getId());
             dos.writeUTF("Blocks");
             dos.writeByte(TagType.TAG_BYTE_ARRAY.getId());
             dos.writeUTF("Data");
-            byte[] blockData = new byte[] {0, 1};
+            byte[] blockData = new byte[] {0, 1, 2, 3};
             dos.writeInt(blockData.length);
             dos.write(blockData);
             dos.writeByte(TagType.TAG_END.getId());
@@ -59,6 +66,16 @@ public class SpongeSchematicNbtTest {
             dos.writeByte(TagType.TAG_INT.getId());
             dos.writeUTF("minecraft:air");
             dos.writeInt(0);
+            dos.writeByte(TagType.TAG_INT.getId());
+            dos.writeUTF("minecraft:stone");
+            dos.writeInt(1);
+            if (largePalette) {
+                for (int i = 2; i < 130; i++) {
+                    dos.writeByte(TagType.TAG_INT.getId());
+                    dos.writeUTF("minecraft:block_" + i);
+                    dos.writeInt(i);
+                }
+            }
             dos.writeByte(TagType.TAG_END.getId());
 
             if (version >= 2) {
@@ -80,6 +97,10 @@ public class SpongeSchematicNbtTest {
             dos.writeByte(TagType.TAG_END.getId());
         }
         return baos.toByteArray();
+    }
+
+    private byte[] createSampleSpongeNbt(int version) throws IOException {
+        return createSampleSpongeNbt(version, false, false);
     }
 
     @Test
@@ -107,5 +128,31 @@ public class SpongeSchematicNbtTest {
         assertNotNull(root);
         assertEquals(3, ((IntTag) root.get("Version")).getValue());
         assertNotNull(root.get("Entities"));
+    }
+
+    @Test
+    public void testSpongeV3PaletteCompressionAndLargePalette() throws Exception {
+        byte[] data = createSampleSpongeNbt(3, false, true);
+        CompoundTag root = NBTUtil.readCompound(new ByteArrayInputStream(data));
+        assertNotNull(root);
+        CompoundTag palette = (CompoundTag) root.get("Palette");
+        assertNotNull(palette);
+        assertEquals(0, ((IntTag) palette.get("minecraft:air")).getValue());
+        assertEquals(1, ((IntTag) palette.get("minecraft:stone")).getValue());
+        assertEquals(129, ((IntTag) palette.get("minecraft:block_129")).getValue());
+    }
+
+    @Test
+    public void testSpongeNegativeCoordinateOffsets() throws Exception {
+        byte[] data = createSampleSpongeNbt(3, true, false);
+        CompoundTag root = NBTUtil.readCompound(new ByteArrayInputStream(data));
+        assertNotNull(root);
+        IntArrayTag offset = (IntArrayTag) root.get("Offset");
+        assertNotNull(offset);
+        int[] vals = offset.getValue();
+        assertEquals(3, vals.length);
+        assertEquals(-10, vals[0]);
+        assertEquals(0, vals[1]);
+        assertEquals(-5, vals[2]);
     }
 }
