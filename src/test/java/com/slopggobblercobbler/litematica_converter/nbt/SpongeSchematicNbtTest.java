@@ -158,24 +158,20 @@ public class SpongeSchematicNbtTest {
 
     @Test
     public void testCorruptedOrTruncatedNbtInput() {
-        // Test completely empty input stream
         assertThrows(IOException.class, () -> {
             NBTUtil.readCompound(new ByteArrayInputStream(new byte[0]));
         });
 
-        // Test truncated GZIP / random junk bytes
         assertThrows(IOException.class, () -> {
             NBTUtil.readCompound(new ByteArrayInputStream(new byte[] { 0x1f, (byte) 0x8b, 0x08, 0x00 }));
         });
 
-        // Test valid gzip header but incomplete payload
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(baos)) {
             gzip.write(new byte[] { 0x0a, 0x00, 0x04, 'T', 'e', 's', 't' });
         } catch (IOException ignored) {}
         
         byte[] truncatedGzip = baos.toByteArray();
-        // Chop off the end to corrupt it
         if (truncatedGzip.length > 5) {
             byte[] corrupted = new byte[truncatedGzip.length - 4];
             System.arraycopy(truncatedGzip, 0, corrupted, 0, corrupted.length);
@@ -183,5 +179,100 @@ public class SpongeSchematicNbtTest {
                 NBTUtil.readCompound(new ByteArrayInputStream(corrupted));
             });
         }
+    }
+
+    @Test
+    public void testNestedCompoundTagDepthExhaustion() {
+        // Construct heavily nested compound tags > 512 depth
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
+             DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
+            
+            dos.writeByte(TagType.TAG_COMPOUND.getId());
+            dos.writeUTF("Root");
+
+            for (int i = 0; i < 600; i++) {
+                dos.writeByte(TagType.TAG_COMPOUND.getId());
+                dos.writeUTF("nested_" + i);
+            }
+
+            // Close all
+            for (int i = 0; i < 601; i++) {
+                dos.writeByte(TagType.TAG_END.getId());
+            }
+        } catch (IOException ignored) {}
+
+        byte[] data = baos.toByteArray();
+        IOException ex = assertThrows(IOException.class, () -> {
+            NBTUtil.readCompound(new ByteArrayInputStream(data));
+        });
+        assertTrue(ex.getMessage().contains("depth exceeded maximum depth limit"));
+    }
+
+    @Test
+    public void testArrayTagBufferExhaustion() {
+        // ByteArrayTag with declared length larger than remaining stream buffer
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
+             DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
+            
+            dos.writeByte(TagType.TAG_COMPOUND.getId());
+            dos.writeUTF("Root");
+
+            dos.writeByte(TagType.TAG_BYTE_ARRAY.getId());
+            dos.writeUTF("HugeBytes");
+            dos.writeInt(999999); // Huge length, but no data follows
+
+            dos.writeByte(TagType.TAG_END.getId());
+        } catch (IOException ignored) {}
+
+        byte[] data = baos.toByteArray();
+        assertThrows(IOException.class, () -> {
+            NBTUtil.readCompound(new ByteArrayInputStream(data));
+        });
+
+        // IntArrayTag with declared length larger than remaining stream buffer
+        ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos2);
+             DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
+            
+            dos.writeByte(TagType.TAG_COMPOUND.getId());
+            dos.writeUTF("Root");
+
+            dos.writeByte(TagType.TAG_INT_ARRAY.getId());
+            dos.writeUTF("HugeInts");
+            dos.writeInt(999999); // Huge length, no data
+
+            dos.writeByte(TagType.TAG_END.getId());
+        } catch (IOException ignored) {}
+
+        byte[] data2 = baos2.toByteArray();
+        assertThrows(IOException.class, () -> {
+            NBTUtil.readCompound(new ByteArrayInputStream(data2));
+        });
+    }
+
+    @Test
+    public void testInvalidUtf8StringTagHeaders() {
+        // Invalid UTF-8 sequence or truncated modified UTF-8 in StringTag / name
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
+             DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
+            
+            dos.writeByte(TagType.TAG_COMPOUND.getId());
+            dos.writeUTF("Root");
+
+            dos.writeByte(TagType.TAG_STRING.getId());
+            // Write invalid UTF-8 length/bytes by writing raw malformed bytes into DataOutput
+            dos.writeShort(10); // claim 10 bytes length
+            dos.write(new byte[] { (byte)0xff, (byte)0xff, (byte)0xff }); // truncated
+
+            dos.writeByte(TagType.TAG_END.getId());
+        } catch (IOException ignored) {}
+
+        byte[] data = baos.toByteArray();
+        assertThrows(IOException.class, () -> {
+            NBTUtil.readCompound(new ByteArrayInputStream(data));
+        });
     }
 }
