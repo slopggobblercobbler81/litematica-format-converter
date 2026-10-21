@@ -183,7 +183,6 @@ public class SpongeSchematicNbtTest {
 
     @Test
     public void testNestedCompoundTagDepthExhaustion() {
-        // Construct heavily nested compound tags > 512 depth
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
              DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
@@ -196,7 +195,6 @@ public class SpongeSchematicNbtTest {
                 dos.writeUTF("nested_" + i);
             }
 
-            // Close all
             for (int i = 0; i < 601; i++) {
                 dos.writeByte(TagType.TAG_END.getId());
             }
@@ -211,7 +209,6 @@ public class SpongeSchematicNbtTest {
 
     @Test
     public void testArrayTagBufferExhaustion() {
-        // ByteArrayTag with declared length larger than remaining stream buffer
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
              DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
@@ -221,7 +218,7 @@ public class SpongeSchematicNbtTest {
 
             dos.writeByte(TagType.TAG_BYTE_ARRAY.getId());
             dos.writeUTF("HugeBytes");
-            dos.writeInt(999999); // Huge length, but no data follows
+            dos.writeInt(999999);
 
             dos.writeByte(TagType.TAG_END.getId());
         } catch (IOException ignored) {}
@@ -231,7 +228,6 @@ public class SpongeSchematicNbtTest {
             NBTUtil.readCompound(new ByteArrayInputStream(data));
         });
 
-        // IntArrayTag with declared length larger than remaining stream buffer
         ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(baos2);
              DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
@@ -241,7 +237,7 @@ public class SpongeSchematicNbtTest {
 
             dos.writeByte(TagType.TAG_INT_ARRAY.getId());
             dos.writeUTF("HugeInts");
-            dos.writeInt(999999); // Huge length, no data
+            dos.writeInt(999999);
 
             dos.writeByte(TagType.TAG_END.getId());
         } catch (IOException ignored) {}
@@ -254,7 +250,6 @@ public class SpongeSchematicNbtTest {
 
     @Test
     public void testInvalidUtf8StringTagHeaders() {
-        // Invalid UTF-8 sequence or truncated modified UTF-8 in StringTag / name
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
              DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
@@ -263,9 +258,8 @@ public class SpongeSchematicNbtTest {
             dos.writeUTF("Root");
 
             dos.writeByte(TagType.TAG_STRING.getId());
-            // Write invalid UTF-8 length/bytes by writing raw malformed bytes into DataOutput
-            dos.writeShort(10); // claim 10 bytes length
-            dos.write(new byte[] { (byte)0xff, (byte)0xff, (byte)0xff }); // truncated
+            dos.writeShort(10);
+            dos.write(new byte[] { (byte)0xff, (byte)0xff, (byte)0xff });
 
             dos.writeByte(TagType.TAG_END.getId());
         } catch (IOException ignored) {}
@@ -274,5 +268,94 @@ public class SpongeSchematicNbtTest {
         assertThrows(IOException.class, () -> {
             NBTUtil.readCompound(new ByteArrayInputStream(data));
         });
+    }
+
+    private byte[] generateStressPayload(int blockCount, int bitsPerEntry) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(baos);
+             DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(gzip))) {
+            
+            dos.writeByte(TagType.TAG_COMPOUND.getId());
+            dos.writeUTF("Schematic");
+
+            dos.writeByte(TagType.TAG_INT.getId());
+            dos.writeUTF("DataVersion");
+            dos.writeInt(2586);
+
+            dos.writeByte(TagType.TAG_INT.getId());
+            dos.writeUTF("Version");
+            dos.writeInt(3);
+
+            dos.writeByte(TagType.TAG_SHORT.getId());
+            dos.writeUTF("Width");
+            dos.writeShort(100);
+
+            dos.writeByte(TagType.TAG_SHORT.getId());
+            dos.writeUTF("Height");
+            dos.writeShort(100);
+
+            dos.writeByte(TagType.TAG_SHORT.getId());
+            dos.writeUTF("Length");
+            dos.writeShort(blockCount / 10000);
+
+            // Blocks byte array
+            int byteCount = (blockCount * bitsPerEntry + 7) / 8;
+            dos.writeByte(TagType.TAG_BYTE_ARRAY.getId());
+            dos.writeUTF("Blocks");
+            dos.writeInt(byteCount);
+            byte[] blockBytes = new byte[byteCount];
+            for (int i = 0; i < byteCount; i++) {
+                blockBytes[i] = (byte) (i % 256);
+            }
+            dos.write(blockBytes);
+
+            // Palette compound with distinct entries
+            dos.writeByte(TagType.TAG_COMPOUND.getId());
+            dos.writeUTF("Palette");
+            int paletteSize = 1 << bitsPerEntry;
+            for (int p = 0; p < paletteSize; p++) {
+                dos.writeByte(TagType.TAG_INT.getId());
+                dos.writeUTF("minecraft:block_" + p);
+                dos.writeInt(p);
+            }
+            dos.writeByte(TagType.TAG_END.getId()); // End Palette
+
+            dos.writeByte(TagType.TAG_END.getId()); // End Root
+        }
+        return baos.toByteArray();
+    }
+
+    @Test
+    public void testStressBenchmarkThroughputAndMemory() throws Exception {
+        int blockCount = 1_000_000;
+        int[] bitWidths = new int[] { 4, 8, 12 };
+
+        System.gc();
+        long memBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+
+        for (int bits : bitWidths) {
+            byte[] payload = generateStressPayload(blockCount, bits);
+
+            long startTime = System.nanoTime();
+            CompoundTag root = NBTUtil.readCompound(new ByteArrayInputStream(payload));
+            long endTime = System.nanoTime();
+
+            assertNotNull(root);
+            assertEquals(3, ((IntTag) root.get("Version")).getValue());
+
+            double durationSeconds = (endTime - startTime) / 1_000_000_000.0;
+            double blocksPerSec = blockCount / durationSeconds;
+            System.out.println(String.format("Stress Benchmark [%d-bit palette, %d blocks]: parsed in %.3f seconds (%.2f blocks/sec)",
+                    bits, blockCount, durationSeconds, blocksPerSec));
+            
+            assertTrue(blocksPerSec > 10_000, "Throughput should exceed 10,000 blocks/sec");
+        }
+
+        System.gc();
+        long memAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        long memGrowth = memAfter - memBefore;
+        System.out.println(String.format("Memory check: Growth after benchmark = %.2f MB", memGrowth / (1024.0 * 1024.0)));
+        // Verify no severe memory leaks (allow reasonable GC buffer)
+        assertTrue(memGrowth < 150 * 1024 * 1024, "Memory growth should remain bounded below 150MB");
     }
 }
